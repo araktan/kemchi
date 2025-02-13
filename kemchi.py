@@ -14,7 +14,8 @@ import re
 
 
 class DaisyChain:
-    def read_yaml_dict(file_path):
+    
+    def read_yaml_dict(self, file_path):
         with open(file_path, 'r') as file:
             yaml_dict = yaml.safe_load(file)
         return yaml_dict
@@ -35,9 +36,9 @@ class DaisyChain:
                             level=logging.DEBUG)
         
         self.logger = logging.getLogger(__name__)
-        self.vtree = [serial.Serial(com_port, 9600, timeout=0.1) for com_port in self.config.com_ports]
-        self.vstate = [0 for v,cp in self.config.valves]
-        self.vtypes = [vtype for vtype in self.config.valve_types]
+        self.vtree = [serial.Serial(com_port, 9600, timeout=0.1) for com_port in self.config['com_ports']]
+        self.vstate = [0 for v in self.config['valve_types']]
+        self.vtypes = [vtype for vtype in self.config['valve_types']]
         self.speed_setting = [DEFAULT_SPEED]
 
     def tstamp():
@@ -57,7 +58,7 @@ class DaisyChain:
         return
 
 
-    def is_counter(curr_pos, next_pos, vtype): #returns True for counterclockwise
+    def is_counter(self, curr_pos, next_pos, vtype): #returns True for counterclockwise
         if curr_pos > next_pos:
             c_wise = next_pos + vtype - curr_pos
             cc_wise = curr_pos - next_pos
@@ -174,16 +175,16 @@ class DaisyChain:
                     print(f'{self.tstamp()}        divided move {repeat+1}/{repeats}: {round(vol_steps*SYRINGE_VOL/MAX_STEPS, 1)}ml ({round((repeat+1)*vol_steps*SYRINGE_VOL/MAX_STEPS, 1)}/{round(SYRINGE_VOL*total_steps/MAX_STEPS, 1)}ml)')
                 
                 # ACTUATE VALVES TO INPUT
-                actuate_valves(from_port)
+                self.actuate_valves(from_port)
                 
                 # ASPIRATE
-                aspirate_pump(vol_steps)
+                self.aspirate_pump(vol_steps)
                 
                 # ACTUATE VALVES TO OUTPUT
-                actuate_valves(to_port)
+                self.actuate_valves(to_port)
                 
                 # DISPENSE
-                dispense_pump(vol_steps)
+                self.dispense_pump(vol_steps)
                 
         return
 
