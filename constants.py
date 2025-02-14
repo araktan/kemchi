@@ -1,8 +1,10 @@
-SYRINGE_VOL = 25 # ml
-MAX_STEPS = 24000 
-DEFAULT_SPEED = 30 # ml min
+#TODO changing naming copnventions to show this as hardware specific 
 
-DEFAULT_SPEED_HZ = int((DEFAULT_SPEED*MAX_STEPS)/(SYRINGE_VOL*60))
+# SYRINGE_VOL = 25 # ml 
+MAX_STEPS = 24000 
+# DEFAULT_SPEED = 30 # ml min
+
+# DEFAULT_SPEED_HZ = int((DEFAULT_SPEED*MAX_STEPS)/(SYRINGE_VOL*60))
 # DEFAUL_SPEED_SETTING_STEPS = 5000 # factory default
 # DEFAULT_SPEED_START = 743 # factory default
 # DEFAULT_SPEED_STOP = 743 # factory default
