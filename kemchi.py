@@ -1,14 +1,12 @@
-from tqdm import tqdm
 import serial
 import time
 import math
 import warnings
-import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime #, timedelta
 import yaml
 import logging
-from constants import * #TODO this perhaps should be split up into config files
+from constants import MAX_STEPS, OK_CODE, WARNING_CODE, CRITICAL_CODE #TODO rewrite to match modules in packages
 import re
 
 
@@ -21,12 +19,12 @@ class DaisyChain:
         return yaml_dict
 
     def __init__(self, 
-                 portmap_path, 
+                 port_map_path, 
                  config_path,
-                 verbose
+                 verbose = True
                  ):
         self.verbose = verbose
-        self.portmap = self.read_yaml_dict(portmap_path)
+        self.port_map = self.read_yaml_dict(port_map_path)
         self.config = self.read_yaml_dict(config_path)
         time_stamp = datetime.now().strftime('%Y-%m-%d-%H-%M')
 
@@ -39,9 +37,11 @@ class DaisyChain:
         self.vtree = [serial.Serial(com_port, 9600, timeout=0.1) for com_port in self.config['com_ports']]
         self.vstate = [0 for v in self.config['valve_types']]
         self.vtypes = [vtype for vtype in self.config['valve_types']]
-        self.speed_setting = [DEFAULT_SPEED]
+        self.SYRINGE_VOL = self.config['syringe_volume']
+        self.DEFAULT_SPEED = self.config['default_speed']
+        self.speed_setting = [self.DEFAULT_SPEED]
 
-    def tstamp():
+    def tstamp(self):
         '''
         returns current time as a string HH:MM:SS
         '''
@@ -50,8 +50,8 @@ class DaisyChain:
 
     def set_pump_speed(self, speed_ml_per_min): # minimum setting is 40 steps/s (hz), factory default 5000 hz
         # pump speed configuration
-        self.speed_setting[0] = speed_ml_per_min
-        speed_hz = int(self.speed_setting/SYRINGE_VOL * MAX_STEPS/60)
+        self.speed_setting = speed_ml_per_min
+        speed_hz = int(self.speed_setting/self.SYRINGE_VOL * MAX_STEPS/60)
         packet = f'/1V{speed_hz}R\r'
         self.vtree[0].write(bytes(packet, 'utf-8'))
         time.sleep(0.1)
@@ -92,7 +92,7 @@ class DaisyChain:
     
     def aspirate_pump(self, abs_steps):
         # pump sleep is experimentaly determined
-        speed_hz = int(self.speed_setting[0]/SYRINGE_VOL * MAX_STEPS/60)
+        speed_hz = int(self.speed_setting/self.SYRINGE_VOL * MAX_STEPS/60)
         pump_sleep_duration =  (abs_steps/speed_hz) + 3
         # print(speed_hz, pump_sleep_duration)
         packet = f'/1A{abs_steps}R\r'
@@ -106,7 +106,7 @@ class DaisyChain:
     
     def dispense_pump(self, abs_steps):
         #always  dispenses to zero, but needs the number of steps to calculate sleep duration    
-        speed_hz = int(self.speed_setting[0]/SYRINGE_VOL * MAX_STEPS/60)
+        speed_hz = int(self.speed_setting/self.SYRINGE_VOL * MAX_STEPS/60)
         pump_sleep_duration =  (abs_steps/speed_hz) + 3
         #print(speed_hz, pump_sleep_duration)
         packet = f'/1A0R\r'
@@ -123,16 +123,26 @@ class DaisyChain:
         if home_pos == False:
             for v in self.vtree:
                 v.write(bytes('/1o1R\r', 'utf-8'))
+        else:
+            self.actuate_valves(home_pos)
 
             
-        message = f'/1W4R\r'
-        self.logger.debug(message)
-        self.vtree[0].write(bytes(message, 'utf-8'))
+        #packet = '/1W4R\r'
+        #self.logger.debug(packet)
+        
+        # flush errors
+        self.vtree[0].write(b'/1Q\r')
+        #response = self.vtree[0].readlines()
+        #self.logger.debug(response)
+        self.vtree[0].write(b'/1W4R\r')
+        response = self.vtree[0].readlines()
+        self.logger.debug(f'INITIALIZE COMMAND RESPONSE: {response}')
+        if self.verbose: print('initialization response: ', response)
         time.sleep(5)
         self.vtree[0].write(b'/1Q\r')
         response = self.vtree[0].readlines()
         self.logger.debug(response)
-        self.set_pump_speed(DEFAULT_SPEED)
+        self.set_pump_speed(self.DEFAULT_SPEED)
         self.dispense_pump(0)
         time.sleep(5) # presumably enough time to dispense, TODO: add busy status checks in state interogation
         return
@@ -154,7 +164,7 @@ class DaisyChain:
         to_port = self.port_map[sink]
         
         # CALCULATE NUMBER OF PUMP MOVES AND CONVERT VOLUME TO TOTAL MOTOR STEPS
-        total_steps = int(MAX_STEPS*volume/SYRINGE_VOL)
+        total_steps = int(MAX_STEPS*volume/self.SYRINGE_VOL)
         
         # if volume is greater than the syring size, it is split up in equal parts and moved or several repeat moves
         repeats = math.ceil(total_steps/MAX_STEPS)
@@ -172,7 +182,7 @@ class DaisyChain:
             
             for repeat in range(repeats):
                 if self.verbose == True and repeats > 1:
-                    print(f'{self.tstamp()}        divided move {repeat+1}/{repeats}: {round(vol_steps*SYRINGE_VOL/MAX_STEPS, 1)}ml ({round((repeat+1)*vol_steps*SYRINGE_VOL/MAX_STEPS, 1)}/{round(SYRINGE_VOL*total_steps/MAX_STEPS, 1)}ml)')
+                    print(f'{self.tstamp()}        divided move {repeat+1}/{repeats}: {round(vol_steps*self.SYRINGE_VOL/MAX_STEPS, 1)}ml ({round((repeat+1)*vol_steps*self.SYRINGE_VOL/MAX_STEPS, 1)}/{round(self.SYRINGE_VOL*total_steps/MAX_STEPS, 1)}ml)')
                 
                 # ACTUATE VALVES TO INPUT
                 self.actuate_valves(from_port)
@@ -203,7 +213,7 @@ class DaisyChain:
         to_port = self.port_map[sink]
         
         # CALCULATE NUMBER OF PUMP MOVES AND CONVERT VOLUME TO TOTAL MOTOR STEPS
-        total_steps = int(MAX_STEPS*volume/SYRINGE_VOL)
+        total_steps = int(MAX_STEPS*volume/self.SYRINGE_VOL)
         
         # if volume is greater than the syring size, it is split up in equal parts and moved or several repeat moves
         repeats = math.ceil(total_steps/MAX_STEPS)
@@ -221,7 +231,7 @@ class DaisyChain:
             
             for repeat in range(repeats):
                 if self.verbose == True and repeats > 1:
-                    print(f'{self.tstamp()}        divided move {repeat+1}/{repeats}: {round(vol_steps*SYRINGE_VOL/MAX_STEPS, 1)}ml ({round((repeat+1)*vol_steps*SYRINGE_VOL/MAX_STEPS, 1)}/{round(SYRINGE_VOL*total_steps/MAX_STEPS, 1)}ml)')
+                    print(f'{self.tstamp()}        divided move {repeat+1}/{repeats}: {round(vol_steps*self.SYRINGE_VOL/MAX_STEPS, 1)}ml ({round((repeat+1)*vol_steps*self.SYRINGE_VOL/MAX_STEPS, 1)}/{round(self.SYRINGE_VOL*total_steps/MAX_STEPS, 1)}ml)')
                 # ACTUATE VALVES TO INPUT
                 self.actuate_valves(from_port)
                 
@@ -235,7 +245,7 @@ class DaisyChain:
                 # DISPENSE
                 self.set_pump_speed(dispense_speed)
                 self.dispense_pump(vol_steps)
-                self.set_pump_speed(DEFAULT_SPEED)
+                self.set_pump_speed(self.DEFAULT_SPEED)
         return
 
     def interrogate_state(self, vtree_index, substep_name):
@@ -284,7 +294,7 @@ class DaisyChain:
         '''
             needs the number of both absolute steps and offset steps to calculate the difference for the sleep duration    
         '''
-        speed_hz = int(self.speed_setting[0]/SYRINGE_VOL * MAX_STEPS/60)
+        speed_hz = int(self.speed_setting/self.SYRINGE_VOL * MAX_STEPS/60)
         pump_sleep_duration =  ((abs_steps-offset_steps)/speed_hz) + 3
         #print(speed_hz, pump_sleep_duration)
         packet = f'/1A{offset_steps}R\r'
@@ -302,12 +312,12 @@ class DaisyChain:
         '''
         self.logger.info(f'fill syringe: {offset} ml liquid from {node} at {speed} ml/min')
         if self.verbose: print(f'{self.tstamp()} fill syringe: {offset} ml liquid from {node} at {speed} ml/min')
-        offset_steps = int(MAX_STEPS*offset/SYRINGE_VOL)
+        offset_steps = int(MAX_STEPS*offset/self.SYRINGE_VOL)
         port_pos = self.port_map[node]
         self.actuate_valves(port_pos)
         self.set_pump_speed(speed)
         self.aspirate_pump(offset_steps)
-        self.set_pump_speed(DEFAULT_SPEED)
+        self.set_pump_speed(self.DEFAULT_SPEED)
         return
 
     def empty_syringe(self, node, offset, speed):
@@ -316,19 +326,19 @@ class DaisyChain:
         '''
         self.logger.info(f'empty syringe: {offset} ml liquid to {node} at {speed} ml/min')
         if self.verbose: print(f'{self.tstamp()} empty syringe: {offset} ml liquid to {node} at {speed} ml/min')
-        offset_steps = int(MAX_STEPS*offset/SYRINGE_VOL)
+        offset_steps = int(MAX_STEPS*offset/self.SYRINGE_VOL)
         port_pos = self.port_map[node]
         self.actuate_valves(port_pos)
         self.set_pump_speed(speed)
         self.dispense_pump(offset_steps)
-        self.set_pump_speed(DEFAULT_SPEED)
+        self.set_pump_speed(self.DEFAULT_SPEED)
         return
 
     def relative_aspirate_pump(self, abs_steps, offset_steps):
         '''
             custom step with offset fill handling
         '''
-        speed_hz = int(self.speed_setting/SYRINGE_VOL * MAX_STEPS/60)
+        speed_hz = int(self.speed_setting/self.SYRINGE_VOL * MAX_STEPS/60)
         pump_sleep_duration =  ((abs_steps-offset_steps)/speed_hz) + 3
         #print(speed_hz, pump_sleep_duration)
         packet = f'/1A{abs_steps}R\r'
@@ -356,10 +366,10 @@ class DaisyChain:
         to_port = self.port_map[sink]
 
         # calculate offset
-        offset_steps = int(MAX_STEPS*offset/SYRINGE_VOL)
+        offset_steps = int(MAX_STEPS*offset/self.SYRINGE_VOL)
         
         # CALCULATE NUMBER OF PUMP MOVES AND CONVERT VOLUME TO TOTAL MOTOR STEPS
-        total_steps = int(MAX_STEPS*volume/SYRINGE_VOL)
+        total_steps = int(MAX_STEPS*volume/self.SYRINGE_VOL)
         # if volume is greater than the syring size, it is split up in equal parts and moved or several repeat moves
         repeats = math.ceil(total_steps/(MAX_STEPS-offset_steps))
         
@@ -377,7 +387,7 @@ class DaisyChain:
             for repeat in range(repeats):
                 
                 if self.verbose == True and repeats > 1:
-                    print(f'{self.tstamp()}        divided move {repeat+1}/{repeats}: {round(vol_steps*SYRINGE_VOL/MAX_STEPS, 1)}ml ({round((repeat+1)*vol_steps*SYRINGE_VOL/MAX_STEPS, 1)}/{round(SYRINGE_VOL*total_steps/MAX_STEPS, 1)}ml)')
+                    print(f'{self.tstamp()}        divided move {repeat+1}/{repeats}: {round(vol_steps*self.SYRINGE_VOL/MAX_STEPS, 1)}ml ({round((repeat+1)*vol_steps*self.SYRINGE_VOL/MAX_STEPS, 1)}/{round(self.SYRINGE_VOL*total_steps/MAX_STEPS, 1)}ml)')
                 # ACTUATE VALVES TO INPUT
                 self.actuate_valves(from_port)
                 
@@ -393,52 +403,10 @@ class DaisyChain:
                 #dispense to offset
                 self.relative_dispense_pump(vol_steps + offset_steps, offset_steps)
         
-        self.set_pump_speed(DEFAULT_SPEED)
+        self.set_pump_speed(self.DEFAULT_SPEED)
         return
 
 
-    # TODO: custom function, to be move out to examples
-    def load_chemicals_to_reactors(self, exp_subset, reactors, STEP):
-        for chemical_name_step in STEP:
-            if np.any(exp_subset[chemical_name_step]):
-                chemical_name = chemical_name_step.split('_')[0]
-                # PRIME CHEMICAL
-                #print(f'priming {chemical_name}')
-                self.move_liquid(chemical_name, 'waste', 0.5, 4)
-                chemical_stock = list(exp_subset[chemical_name_step])
-                for reactor_index, volume in enumerate(chemical_stock):
-                    if volume != 0:
-                        #print(f'moving {volume} ml from {chemical_name} to {reactors[reactor_index]}')
-                        self.move_liquid(chemical_name, reactors[reactor_index], volume)
-        return
-
-    # TODO: custom function, to be move out to examples
-    def sample_reactors(self, reactors, count):
-        for i in range(count):
-            self.move_liquid(reactors[i], 'waste', 0.5, 2) # TODO: needs to account for the dead volume of tube
-            self.move_liquid(reactors[i], 'sampler', 1)
-            self.move_liquid('air', 'waste', 2)
-            self.move_liquid('air', 'sampler', 1)
-            self.move_liquid('water', 'waste', 2)
-            self.move_liquid('water', 'sampler', 0.5)
-            self.move_liquid('air', 'waste', 2)
-            self.move_liquid('air', 'sampler', 1)
-            self.sampler_next()
-            time.sleep(1)
-        return
-
-    # TODO: created as a custom function, to be move out to examples
-    def check_chem_ports(self, port_map, df, exclude_list):
-        ports = port_map.keys()
-        chems_steps = df.columns
-        for chem_step in chems_steps:
-            chem = chem_step.split('_')[0]
-            if chem not in ports and chem not in exclude_list:
-                raise Exception(f'Chemical {chem} not added to port_map.yaml configuration file!')
-            elif chem not in exclude_list:
-                print(f'{chem_step}: {chem}: {port_map[chem]} OK')
-        print('Chem port check result: appears ok')
-        return
 
     # TODO: do a self test, to run at the least when initiating    
     def self_check():
