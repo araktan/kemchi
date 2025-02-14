@@ -28,7 +28,7 @@ k0.move_liquid('toluene', 'reactor1', volume=10)
 this would add 10ml of toluene to reactor1.
 
 
-#liquid handling backbone topology#
+## liquid handling backbone topology ##
 
 The backbone is aranged daisy-chain topology - single pump, with additional linearly conmnected distribution valves. The key takeaway is that it drastically increases efficiency of hardware, decreases dead volumes, increases number of productive ports as well as permits minimalistic and intuitive codebase.
 
