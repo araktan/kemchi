@@ -1,0 +1,31 @@
+---
+# First valve ports
+#'1':'1' # reserved for waste
+'water': '2'
+'nahco3': '3'
+#'4': '4'
+'air': '5' # best to leave the most obstructed port reserved for air (empty) port
+#'6': '6'
+#'7': '7'
+#'8': '8'
+
+# Second valve ports
+#'11':'11' # reserved for waste
+#'12': '12'
+#'13': '13'
+'nacl': '14'
+#'15': '15'
+#'16': '16'
+#'17': '17'
+#'18': '18'
+
+# Third valve ports
+'waste': '111' # reserved for waste
+#'112':'112'
+#'113':'113'
+'reactor1': '114'
+#'reactor2': '115'
+#'116': '116'
+#'117': '117'
+'sampler': '118' # sampler entry point
+...

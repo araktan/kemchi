@@ -1,0 +1,6 @@
+---
+com_ports: ['COM1', 'COM2', 'COM3']
+valve_types: [6, 8, 8]
+syringe_volume: 10
+default_speed: 30
+...
